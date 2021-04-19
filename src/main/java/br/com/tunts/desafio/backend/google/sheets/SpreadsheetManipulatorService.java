@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -24,6 +25,7 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
+import com.google.api.services.sheets.v4.model.UpdateValuesResponse;
 import com.google.api.services.sheets.v4.model.ValueRange;
 
 import br.com.tunts.desafio.backend.domain.Student;
@@ -31,9 +33,13 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
-public class SheetsReader {
+public class SpreadsheetManipulatorService {
 
-	private static final String APPLICATION_NAME = "Desafio Tunts - Backend Java - Leonardo Andreatta de Alcantara";
+	private static final String ACCESS_TYPE = "offline";
+
+	private static final int OAUTH_SERVER_PORT = 8888;
+
+	private static final String APPLICATION_NAME = "Tunts-Backend-Java-Leonardo-Alcantara";
 
 	private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
@@ -43,7 +49,7 @@ public class SheetsReader {
 	 * The scope of what is be available for this program to do when manipulating the Google Spreadsheet. Since we need to update it ,
 	 * it is required full access. 
 	 */
-	private static final List<String> SCOPES = Collections.singletonList(SheetsScopes.SPREADSHEETS);
+	private static final List<String> SCOPES = Arrays.asList(SheetsScopes.SPREADSHEETS, SheetsScopes.DRIVE);
 
 	private static final String CREDENTIALS_FILE_PATH = "/credentials.json";
 
@@ -55,6 +61,12 @@ public class SheetsReader {
 
 	@Value("${spreadsheet.numberOfClasses.range}")
 	private String spreadhSheetNumberOfClassesRange;
+	
+	@Value("${spreadsheet.valueInputOption}")
+	private String valueInputOption;
+	
+	@Value("${credential.user}")
+	private String credentialUser;
 
 	/**
 	 * Creates an authorized Credential object in order to manipulate a Google Spreadsheet. It reads the credentials
@@ -64,10 +76,10 @@ public class SheetsReader {
 	 * @return An authorized Credential object.
 	 * @throws IOException If the credentials.json file cannot be found.
 	 */
-	private static Credential getCredentials(final NetHttpTransport HTTP_TRANSPORT) throws IOException {
+	private Credential getCredentials(final NetHttpTransport HTTP_TRANSPORT) throws IOException {
 
 		// Load client secrets.
-		InputStream in = SheetsReader.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
+		InputStream in = SpreadsheetManipulatorService.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
 
 		if (in == null) {
 
@@ -79,10 +91,10 @@ public class SheetsReader {
 		GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(HTTP_TRANSPORT, JSON_FACTORY,
 				clientSecrets, SCOPES)
 						.setDataStoreFactory(new FileDataStoreFactory(new java.io.File(TOKENS_DIRECTORY_PATH)))
-						.setAccessType("offline")
+						.setAccessType(ACCESS_TYPE)
 						.build();
-		LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort(8888).build();
-		return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
+		LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort(OAUTH_SERVER_PORT).build();
+		return new AuthorizationCodeInstalledApp(flow, receiver).authorize(this.credentialUser);
 
 	}
 
@@ -98,12 +110,11 @@ public class SheetsReader {
 	public List<Student> readSheet() throws IOException, GeneralSecurityException {
 
 		// Build a new authorized API client service.
-		final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
+		final NetHttpTransport HTTP_TRANSPORT = buildHTTPTransport();
 
-		Sheets service = new Sheets.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
-				.setApplicationName(APPLICATION_NAME)
-				.build();
-		ValueRange response = service.spreadsheets().values().get(spreadsheetId, spreadsheetRange).execute();
+		Sheets service = createSheetsService(HTTP_TRANSPORT);
+		
+		ValueRange response = loadValuesFromSheet(service, spreadsheetRange);
 
 		List<List<Object>> values = response.getValues();
 
@@ -113,29 +124,26 @@ public class SheetsReader {
 			return Collections.emptyList();
 		}
 
-		return values.stream().map(this::mapRowToStudent).collect(Collectors.toList());
+		return values.stream().map(row -> Student.mapToStudent(row)).collect(Collectors.toList());
 
 	}
 
-	/**
-	 * Auxiliary method that parses each row from the spreadsheet and creates the
-	 * appropriate {@link Student} object that represents it.
-	 * 
-	 * @param row the Google spreadsheet row, read from Google Sheets.
-	 * @return the student object that represents the row being read.
-	 */
-	private Student mapRowToStudent(List<Object> row) {
+	private ValueRange loadValuesFromSheet(Sheets service, String spreadsheetRange) throws IOException {
 
-		return Student.builder()
-				.enrollmentId(Long.valueOf((String) row.get(0)))
-				.name((String) row.get(1))
-				.absences(Long.valueOf((String) row.get(2)))
-				.firstGrade(Long.valueOf((String) row.get(3)))
-				.secondGrade(Long.valueOf((String) row.get(4)))
-				.thirdGrade(Long.valueOf((String) row.get(5)))
+		return service.spreadsheets().values().get(spreadsheetId, spreadsheetRange).execute();
+
+	}
+
+	private Sheets createSheetsService(final NetHttpTransport HTTP_TRANSPORT) throws IOException {
+
+		Sheets service = new Sheets.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
+				.setApplicationName(APPLICATION_NAME)
 				.build();
+		return service;
 
 	}
+
+	
 
 	/**
 	 * Specific method to derive the total number of classes that the course had.
@@ -149,15 +157,10 @@ public class SheetsReader {
 	public Long readNumberOfClasses() throws IOException, GeneralSecurityException {
 
 		// Build a new authorized API client service.
-		final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
+		final NetHttpTransport HTTP_TRANSPORT = buildHTTPTransport();
 
-		Sheets service = new Sheets.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
-				.setApplicationName(APPLICATION_NAME)
-				.build();
-		ValueRange response = service.spreadsheets()
-				.values()
-				.get(spreadsheetId, spreadhSheetNumberOfClassesRange)
-				.execute();
+		Sheets service = createSheetsService(HTTP_TRANSPORT);
+		ValueRange response = loadValuesFromSheet(service, spreadhSheetNumberOfClassesRange);
 
 		List<List<Object>> values = response.getValues();
 
@@ -168,20 +171,47 @@ public class SheetsReader {
 		}
 
 		String numOfClass = ((String) values.get(0).get(0)).split(":")[1];
+		
+		log.info("Total amount of classes read from spreadsheet :: {}", numOfClass);
 
 		return Long.valueOf(numOfClass.trim());
 
 	}
 
+	private NetHttpTransport buildHTTPTransport() throws GeneralSecurityException, IOException {
+
+		return GoogleNetHttpTransport.newTrustedTransport();
+
+	}
+
 	/**
-	 * Writes the updated values for each students' situation, after the analyses
+	 * Writes the updated values for each students' situation, after the analysis
 	 * has been completed on their grades.
 	 * 
 	 * @param students the students being recorded back into the spreadsheet.
+	 * @throws IOException 
+	 * @throws GeneralSecurityException 
 	 */
-	public void updateSheets(List<Student> students) {
+	public void updateSheets(List<Student> students) throws GeneralSecurityException, IOException {
 
-		// TODO Auto-generated method stub
+		log.info("Updating the spreadsheet...");
+		
+		// transforms from Student objects to List<Object>
+		List<List<Object>> rows = students.stream().map(Student::mapToRow).collect(Collectors.toList());
+		
+		// necessary values/config for updating the sheet
+		ValueRange body = new ValueRange().setValues(rows);
+		final NetHttpTransport HTTP_TRANSPORT = buildHTTPTransport();
+		Sheets service = createSheetsService(HTTP_TRANSPORT);
+		
+		//performs the update and get the response back.
+		UpdateValuesResponse response =
+		        service.spreadsheets().values().update(spreadsheetId, this.spreadsheetRange, body)
+		                .setValueInputOption(valueInputOption)
+		                .execute();
+		
+		log.info("{} rows were updated in the spreadsheet", response.getUpdatedCells());
+		
 
 	}
 

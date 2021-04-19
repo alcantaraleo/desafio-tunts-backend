@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 
 import br.com.tunts.desafio.backend.domain.Student;
 import br.com.tunts.desafio.backend.domain.StudentSituation;
-import br.com.tunts.desafio.backend.google.sheets.SheetsReader;
+import br.com.tunts.desafio.backend.google.sheets.SpreadsheetManipulatorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -33,7 +33,7 @@ public class GradeAnalyzerService {
 
 	private static final long MINIMUM_GRADE_FOR_NAF = 50l;
 
-	private final SheetsReader sheetsReader;
+	private final SpreadsheetManipulatorService sheetsReader;
 
 	private final AttendanceAnalyzerService attendanceAnalyzerService;
 
@@ -53,25 +53,29 @@ public class GradeAnalyzerService {
 
 		try {
 
+			//reads the students from Google Spreadsheet
 			List<Student> students = this.sheetsReader.readSheet();
 
-			students = this.attendanceAnalyzerService.analyzeAttendances(students);
+			//Verifies their attendance rate
+			this.attendanceAnalyzerService.analyzeAttendances(students);
 
-			students = students.stream()
+			//Only analyzes the students which haven't been already failed by their absence rate
+			students.stream()
 					.filter(student -> student.getSituation() == null
 							|| !student.getSituation().equals(StudentSituation.REPROVADO_POR_FALTA))
 					.map(this::analyzeGrade)
 					.collect(Collectors.toList());
 
+			//Updates the spreadsheet with the analyzed values.
 			this.sheetsReader.updateSheets(students);
 
 		} catch (IOException e) {
 
-			log.error("There was an error while reading the spreadsheet", e);
+			log.error("There was an error while reading/updating the spreadsheet", e);
 
 		} catch (GeneralSecurityException e) {
 
-			log.error("There was a security exception error while reading the spreadsheet", e);
+			log.error("There was a security exception error while reading/updating the spreadsheet", e);
 		}
 
 	}
@@ -86,7 +90,7 @@ public class GradeAnalyzerService {
 	 */
 	private Student analyzeGrade(Student student) {
 
-		log.info("Analisando a nota do(a) Aluno(a) {} - Matricula {}", student.getName(), student.getEnrollmentId());
+		log.info("Analyzing student's {} - Enrollment {}  grades", student.getName(), student.getEnrollmentId());
 
 		Long averageGrade = BigDecimal.valueOf(student.getFirstGrade())
 				.add(BigDecimal.valueOf(student.getSecondGrade()))
@@ -95,7 +99,7 @@ public class GradeAnalyzerService {
 				.setScale(0, RoundingMode.CEILING)
 				.longValue();
 
-		log.info("Aluno(a) {} obteve média {}", student.getName(), averageGrade);
+		log.info("Student {} obtained an average score of {}", student.getName(), averageGrade);
 
 		if (averageGrade < GradeAnalyzerService.FAILING_GRADE) {
 
@@ -109,7 +113,7 @@ public class GradeAnalyzerService {
 			student.setSituation(StudentSituation.EXAME_FINAL);
 		}
 
-		log.info("Aluno(a) {} - Matricula {} - situação final: {}, NAF (se aplicável): {}", student.getName(),
+		log.info("Student {} - Enrollment {} - situation: {}, NAF (if applicable): {}", student.getName(),
 				student.getEnrollmentId(), student.getSituation(), student.getNecessaryGrade() != null ? student.getNecessaryGrade() : "N/A");
 
 		return student;

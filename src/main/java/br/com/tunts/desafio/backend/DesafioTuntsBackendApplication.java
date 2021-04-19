@@ -15,12 +15,12 @@ public class DesafioTuntsBackendApplication {
 
 	@PostConstruct
 	public void onCreate() {
-		log.info("### DesafioTuntsBackendApplication inicializou ###");
+		log.info("### DesafioTuntsBackendApplication started ###");
 	}
 	
 	@PreDestroy
 	public void onDestroy() {
-		log.info("### DesafioTuntsBackendApplication finalizou ###");
+		log.info("### DesafioTuntsBackendApplication ended ###");
 	}
 
 	public static void main(String[] args) {

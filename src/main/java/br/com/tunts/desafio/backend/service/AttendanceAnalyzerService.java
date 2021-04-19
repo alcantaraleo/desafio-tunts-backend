@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 
 import br.com.tunts.desafio.backend.domain.Student;
 import br.com.tunts.desafio.backend.domain.StudentSituation;
-import br.com.tunts.desafio.backend.google.sheets.SheetsReader;
+import br.com.tunts.desafio.backend.google.sheets.SpreadsheetManipulatorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -20,13 +20,22 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class AttendanceAnalyzerService {
 	
-	private final SheetsReader sheetsReader;
+	private final SpreadsheetManipulatorService sheetsReader;
 	
+	/**
+	 * Verifies the student's absences and if over the threshold then fail them based on that.
+	 * @param students
+	 * @return
+	 * @throws IOException
+	 * @throws GeneralSecurityException
+	 */
 	public List<Student> analyzeAttendances(List<Student> students) throws IOException, GeneralSecurityException {
 		
 		Long numOfClasses = this.sheetsReader.readNumberOfClasses();
 		
 		Long maxAbsences = new BigDecimal(numOfClasses).multiply(new BigDecimal(0.25)).setScale(0, RoundingMode.CEILING).longValue();
+		
+		log.info("The maximum number of absences allowed is :: {}", maxAbsences);
 		
 		return students.stream().map(student -> this.analyzeAttendance(student,maxAbsences)).collect(Collectors.toList());
 		
@@ -35,6 +44,7 @@ public class AttendanceAnalyzerService {
 	private Student analyzeAttendance(Student student, Long maxAbsences) {
 
 		if (student.getAbsences() > maxAbsences) {
+			log.info("Student {} - Enrollment {} - has flunked due to absences", student.getName(), student.getEnrollmentId());
 			student.setSituation(StudentSituation.REPROVADO_POR_FALTA);
 		}
 		

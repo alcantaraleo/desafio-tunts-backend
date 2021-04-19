@@ -18,11 +18,11 @@ public class StartupApplicationListener implements ApplicationListener<ContextRe
 	@Override
 	public void onApplicationEvent(ContextRefreshedEvent event) {
 
-		log.info("Inicialização concluída, dando início a análise da planilha...");
+		log.info("Starting spreadsheet analysis...");
 		
 		gradeAnalyzerService.doAnalysis();
 		
-		log.info("Análise concluída...");
+		log.info("Analysis completed...");
 		
 
 	}
